@@ -30,7 +30,7 @@ import { deviceManager } from "./device-manager.js";
 const server = new Server(
   {
     name: "lookin-mcp-server",
-    version: "1.0.4",
+    version: "1.0.5",
   },
   {
     capabilities: {
