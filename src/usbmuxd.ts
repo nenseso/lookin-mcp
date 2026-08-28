@@ -20,7 +20,6 @@ const bplistParser = require("bplist-parser") as {
 };
 
 const USBMUXD_SOCKET = "/var/run/usbmuxd";
-const LOOKINSERVER_PORT = 47190;
 
 // ──────────────────────────────────────────────────────────────
 // Internal helpers
@@ -186,7 +185,7 @@ export async function watchDevices(onEvent: (event: DeviceEvent) => void): Promi
  */
 export async function connectToDevice(
   deviceId: number,
-  port: number = LOOKINSERVER_PORT
+  port: number
 ): Promise<net.Socket> {
   const sock = await connectSocket();
 

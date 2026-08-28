@@ -1,6 +1,6 @@
 # lookin-mcp-ios
 
-MCP Server for iOS UI inspection — lets any AI agent (Claude Code, Cursor, Codex, etc.) inspect live iOS app UI hierarchy, attributes, and screenshots via LookinServer, no Lookin.app required.
+MCP Server for iOS UI inspection — lets any AI agent (Claude Code, Cursor, Codex, etc.) inspect live iOS app UI hierarchy, attributes, and screenshots via LookinServer, no Lookin.app required. It discovers LookinServer on ports 47190–47199.
 
 ---
 
@@ -42,7 +42,7 @@ AI Agent (Claude Code / Cursor / Codex / ...)
     ↓ stdio (MCP protocol)
 lookin-mcp-ios (Node.js)
     ↓ native usbmuxd socket (/var/run/usbmuxd)
-    ↓ TCP proxy on :47191
+    ↓ ephemeral local TCP proxy → discovered device port 47190–47199
 LookinServer (embedded in iOS App)
 ```
 

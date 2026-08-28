@@ -2,7 +2,7 @@
 /**
  * Lookin MCP Server
  *
- * Implements MCP protocol via stdio, directly connects to LookinServer (127.0.0.1:47190),
+ * Implements MCP protocol via stdio and discovers LookinServer on 127.0.0.1:47190-47199,
  * allowing Claude Code to directly access iOS App UI view information:
  * - lookin_get_hierarchy: get iOS App view hierarchy tree
  * - lookin_get_attributes: query UI attributes of a specified view
@@ -132,12 +132,12 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  // Clean up iproxy subprocess on exit
+  // Clean up the usbmuxd proxy and device watcher on exit.
   process.on("exit", () => { deviceManager.shutdown(); });
   process.on("SIGINT", async () => { await deviceManager.shutdown(); process.exit(0); });
   process.on("SIGTERM", async () => { await deviceManager.shutdown(); process.exit(0); });
 
-  process.stderr.write("[lookin-mcp-server] Server started (LookinServer :47190)\n");
+  process.stderr.write("[lookin-mcp-server] Server started (LookinServer ports 47190-47199)\n");
 
   // Auto-connect if exactly 1 device is available
   deviceManager.autoConnect().catch(() => { /* non-fatal */ });

@@ -1,7 +1,7 @@
 {
   "name": "lookin-mcp-ios",
   "version": "1.0.4",
-  "description": "MCP Server for LookinServer — direct connection to iOS App (127.0.0.1:47190), no Lookin.app required",
+  "description": "MCP Server for LookinServer — discovers iOS Apps on 127.0.0.1:47190-47199, no Lookin.app required",
   "main": "dist/mcp-server.js",
   "bin": {
     "lookin-mcp-ios": "dist/mcp-server.js"

@@ -3,8 +3,8 @@
  *
  * Manages lookin-mcp connection targets (simulator or USB physical device).
  *
- * Physical device mode: starts a local TCP proxy on 127.0.0.1:47191,
- * each inbound connection is tunneled to device :47190 via usbmuxd Unix socket with bidirectional piping.
+ * Physical device mode: discovers LookinServer in its HTTP port range, then
+ * starts an ephemeral local TCP proxy tunneled to that device port via usbmuxd.
  * client.ts fetch logic requires no changes.
  *
  * Dependency: macOS built-in usbmuxd (/var/run/usbmuxd), zero external tool dependencies.
@@ -14,8 +14,9 @@ import * as net from "net";
 import { execSync } from "child_process";
 import { listUsbDevices, connectToDevice, watchDevices } from "./usbmuxd.js";
 
-const LOOKINSERVER_PORT = 47190;
-const DEVICE_PROXY_PORT = 47191;
+const LOOKINSERVER_PORT_START = 47190;
+const LOOKINSERVER_PORT_END = 47199;
+const PORT_PROBE_TIMEOUT_MS = 500;
 
 export type ConnectionTarget =
   | { type: "simulator" }
@@ -30,16 +31,29 @@ export interface DeviceInfo {
 class DeviceManager {
   private _activeTarget: ConnectionTarget = { type: "simulator" };
   private _proxyServer: net.Server | null = null;
+  private _proxyPort: number | null = null;
+  private _simulatorServerPort: number | null = null;
   private _activeDeviceId: number | null = null;
   private _needsDeviceSelection = false;
   private _stopWatch: (() => void) | null = null;
   /** deviceId → udid map, kept in sync by watchDevices */
   private _deviceIdMap = new Map<number, string>();
 
-  getBaseUrl(): string {
-    return this._activeTarget.type === "device"
-      ? `http://127.0.0.1:${DEVICE_PROXY_PORT}`
-      : `http://127.0.0.1:${LOOKINSERVER_PORT}`;
+  async getBaseUrl(): Promise<string> {
+    if (this._activeTarget.type === "device") {
+      if (this._proxyPort === null) {
+        if (this._activeDeviceId === null) {
+          throw new Error("No physical device is connected.");
+        }
+        await this._discoverAndStartDeviceProxy(this._activeDeviceId);
+      }
+      return `http://127.0.0.1:${this._proxyPort}`;
+    }
+
+    if (this._simulatorServerPort === null) {
+      this._simulatorServerPort = await this._discoverSimulatorServerPort();
+    }
+    return `http://127.0.0.1:${this._simulatorServerPort}`;
   }
 
   getActiveTarget(): ConnectionTarget {
@@ -128,6 +142,7 @@ class DeviceManager {
   async connectSimulator(): Promise<void> {
     await this._stopProxy();
     this._activeDeviceId = null;
+    this._simulatorServerPort = null;
     this._activeTarget = { type: "simulator" };
     this._needsDeviceSelection = false;
   }
@@ -150,19 +165,18 @@ class DeviceManager {
 
     await this._stopProxy();
     this._activeDeviceId = dev.deviceId;
-    await this._startProxy(dev.deviceId);
     this._activeTarget = { type: "device", udid };
     this._needsDeviceSelection = false;
   }
 
   /**
-   * Start a local TCP proxy on 127.0.0.1:47191.
-   * Each incoming connection is tunneled to device:47190 via usbmuxd.
+   * Start an ephemeral local TCP proxy. Each incoming connection is tunneled
+   * to the selected LookinServer port on the device via usbmuxd.
    */
-  private _startProxy(deviceId: number): Promise<void> {
+  private _startProxy(deviceId: number, devicePort: number): Promise<void> {
     return new Promise((resolve, reject) => {
       const server = net.createServer((clientSock) => {
-        connectToDevice(deviceId, LOOKINSERVER_PORT)
+        connectToDevice(deviceId, devicePort)
           .then((tunnel) => {
             clientSock.pipe(tunnel);
             tunnel.pipe(clientSock);
@@ -178,31 +192,93 @@ class DeviceManager {
 
       this._proxyServer = server;
 
-      server.listen(DEVICE_PROXY_PORT, "127.0.0.1", () => resolve());
+      server.listen(0, "127.0.0.1", () => {
+        const address = server.address();
+        if (!address || typeof address === "string") {
+          reject(new Error("Failed to determine the local proxy port."));
+          return;
+        }
+        this._proxyPort = address.port;
+        resolve();
+      });
 
       server.on("error", (err: NodeJS.ErrnoException) => {
         this._proxyServer = null;
-        if (err.code === "EADDRINUSE") {
-          reject(
-            new Error(
-              `Port ${DEVICE_PROXY_PORT} is already in use. Stop any existing lookin-mcp instance first.`
-            )
-          );
-        } else {
-          reject(err);
-        }
+        this._proxyPort = null;
+        reject(err);
       });
     });
+  }
+
+  private async _discoverSimulatorServerPort(): Promise<number> {
+    const candidates = await Promise.all(
+      this._serverPorts().map(async (port) => ({
+        port,
+        status: await this._probeStatus(`http://127.0.0.1:${port}`),
+      }))
+    );
+    const servers = candidates.filter((candidate) => candidate.status !== null);
+    servers.sort((a, b) =>
+      Number(Boolean(b.status?.active)) - Number(Boolean(a.status?.active)) || a.port - b.port
+    );
+    if (servers.length === 0) {
+      throw new Error(
+        `Cannot find LookinServer on ports ${LOOKINSERVER_PORT_START}-${LOOKINSERVER_PORT_END}.`
+      );
+    }
+    return servers[0].port;
+  }
+
+  private async _discoverAndStartDeviceProxy(deviceId: number): Promise<void> {
+    for (const devicePort of this._serverPorts()) {
+      await this._startProxy(deviceId, devicePort);
+      const baseUrl = `http://127.0.0.1:${this._proxyPort}`;
+      if (await this._probeStatus(baseUrl)) {
+        return;
+      }
+      await this._stopProxy();
+    }
+    throw new Error(
+      `Cannot find LookinServer on device ports ${LOOKINSERVER_PORT_START}-${LOOKINSERVER_PORT_END}.`
+    );
+  }
+
+  private _serverPorts(): number[] {
+    return Array.from(
+      { length: LOOKINSERVER_PORT_END - LOOKINSERVER_PORT_START + 1 },
+      (_, index) => LOOKINSERVER_PORT_START + index
+    );
+  }
+
+  private async _probeStatus(baseUrl: string): Promise<{ active?: boolean } | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), PORT_PROBE_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${baseUrl}/status`, { signal: controller.signal });
+      if (!response.ok) return null;
+      const json = await response.json() as {
+        success?: boolean;
+        data?: { protocol?: string; active?: boolean };
+      };
+      if (!json.success || json.data?.protocol !== "lookin-mcp") return null;
+      return json.data;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   private _stopProxy(): Promise<void> {
     return new Promise((resolve) => {
       if (!this._proxyServer) {
+        this._proxyPort = null;
         resolve();
         return;
       }
       this._proxyServer.close(() => resolve());
       this._proxyServer = null;
+      this._proxyPort = null;
     });
   }
 

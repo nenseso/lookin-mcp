@@ -60,6 +60,9 @@ export interface ScreenshotResult {
 }
 
 export interface StatusResult {
+  protocol?: string;
+  protocolVersion?: number;
+  port?: number;
   active: boolean;
   appName?: string;
   bundleId?: string;
@@ -78,7 +81,7 @@ async function request<T>(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-  const BASE_URL = deviceManager.getBaseUrl();
+  const BASE_URL = await deviceManager.getBaseUrl();
 
   try {
     const response = await fetch(`${BASE_URL}${path}`, {

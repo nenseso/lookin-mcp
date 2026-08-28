@@ -7,7 +7,7 @@ export const connectDeviceTool: Tool = {
   description:
     "Switch the lookin-mcp connection target. " +
     "Pass a device UDID (from lookin_list_devices) to connect to a USB physical device — " +
-    "this automatically starts iproxy port forwarding. " +
+    "this automatically discovers the device port and starts USB port forwarding. " +
     "Pass 'simulator' to switch back to the iOS simulator. " +
     "After switching, the connection is verified automatically.",
   inputSchema: {
@@ -49,17 +49,17 @@ export async function handleConnectDevice(args: {
       message:
         target === "simulator"
           ? "Switched to simulator successfully."
-          : `Connected to device ${target} via USB (iproxy port forwarding active).`,
+          : `Connected to device ${target} via USB (port forwarding active).`,
     });
   } catch (err) {
-    // iproxy is running but the app is not in the foreground yet
+    // The device is selected but the app may not be in the foreground yet.
     const errMsg = err instanceof Error ? err.message : String(err);
     return JSON.stringify({
       success: true,
       target: deviceManager.getActiveTarget(),
       serverStatus: null,
       warning:
-        `Port forwarding is active but LookinServer is not responding: ${errMsg}. ` +
+        `LookinServer is not responding on the selected device: ${errMsg}. ` +
         "Make sure your app with LookinServer is running in the foreground on the device.",
     });
   }
