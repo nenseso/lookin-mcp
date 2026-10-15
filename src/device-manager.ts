@@ -258,9 +258,11 @@ class DeviceManager {
       if (!response.ok) return null;
       const json = await response.json() as {
         success?: boolean;
-        data?: { protocol?: string; active?: boolean };
+        data?: { active?: boolean };
       };
-      if (!json.success || json.data?.protocol !== "lookin-mcp") return null;
+      // LookinServer tags 1.0.0/1.0.1 don't return a "protocol" field in /status yet;
+      // requiring it made device discovery always fail. Accept any successful status.
+      if (!json.success || !json.data) return null;
       return json.data;
     } catch {
       return null;
